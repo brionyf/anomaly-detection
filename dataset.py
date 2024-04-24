@@ -1,4 +1,13 @@
-from __future__ import annotations
+import os
+import numpy as np
+import cv2
+import math
+from skimage.filters.rank import median
+#import torchvision.transforms.functional as TF
+from omegaconf import DictConfig, ListConfig, OmegaConf
+#import time
+from datetime import datetime
+import copy
 
 import logging
 from pathlib import Path
@@ -7,18 +16,9 @@ from typing import Sequence
 import albumentations as A
 from pandas import DataFrame
 from argparse import ArgumentParser, Namespace
-
-import os
-import numpy as np
-import cv2
-import math
-from skimage.filters.rank import median
-import torchvision.transforms.functional as TF
-from omegaconf import DictConfig, ListConfig, OmegaConf
-import time
-from datetime import datetime
-
 from abc import ABC
+
+from torch import Tensor
 from pytorch_lightning import LightningDataModule
 from torch.utils.data import DataLoader, default_collate
 from torch.utils.data.dataset import Dataset, random_split
@@ -31,13 +31,12 @@ logger = logging.getLogger(__name__)
 def get_args():
     parser = ArgumentParser()
     parser.add_argument("--model", type=str, help="Name of model to train/evaluate")
-    args = parser.parse_args()
-    return args
+    return parser.parse_args()
     
-def collate_fn(batch: list) -> dict[str, Any]:
+def collate_fn(batch: list):
     return default_collate(batch)
 
-def make_dataset(root: str | Path, split: str | Split | None = None) -> DataFrame:
+def get_dataframe(root: str | Path, split: str | None = None) -> DataFrame:
 
     root = Path(root)
     samples_list = [(str(root),) + f.parts[-3:] for f in root.glob(r"**/*") if f.suffix in ['.png']]
@@ -67,70 +66,32 @@ def make_dataset(root: str | Path, split: str | Split | None = None) -> DataFram
         samples.loc[samples.label_index == 1]
         .apply(lambda x: Path(x.image_path).stem in Path(x.mask_path).stem, axis=1)
         .all()
-    ), "Mismatch between anomalous images and ground truth masks. Make sure the mask files in 'ground_truth' \
-              folder follow the same naming convention as the anomalous images in the dataset (e.g. image: '000.png', \
-              mask: '000.png' or '000_mask.png')."
+    ), "Filenames of anomalous images don't match ground truth masks. \
+              (e.g. image: '000.png', mask: '000.png' or '000_mask.png')."
 
     if split:
         samples = samples[samples.split == split].reset_index(drop=True)
 
+    #print("df_samples information: \tNumber of image paths: {} \t Columns: {}".format(len(samples), samples.columns))
     return samples
 
-
-#class MVTecDataset(AnomalibDataset):
 class CustomDataset(Dataset, ABC):
-    """
-    Args:
-        task (str): 'classification', 'detection' or 'segmentation'
-        transform (A.Compose): Albumentations Compose object describing the transforms that are applied to the inputs.
-        split (str | Split | None): Split of the dataset, usually Split.TRAIN or Split.TEST
-        root (Path | str): Path to the root of the dataset
-        category (str): Sub-category of the dataset, e.g. 'bottle'
-    """
 
-    def __init__(self, task: str, transform: A.Compose, root: Path | str, category: str, split: str | Split | None = None,) -> None:
+    def __init__(self, task: str, transform: A.Compose, root: Path | str, category: str, split: str | None = None,) -> None:
         super().__init__() #task=task, transform=transform)
-
         self.root_category = Path(root) / Path(category)
-        self.split = split
-        self.task = task
+        self.split = split # train or test
+        self.task = task # 'classification', 'detection' or 'segmentation'
         self.transform = transform
-        self.samples = make_dataset(self.root_category, split=self.split)
-        #self._samples: DataFrame = None
-        self.is_setup = False
-        if isinstance(self.samples, DataFrame):
-            self.is_setup = True        
+        self.df_images = get_dataframe(self.root_category, split=self.split)
 
     def __len__(self) -> int:
-        return len(self.samples)
-
-    def subsample(self, indices: Sequence[int], inplace: bool = False):
-        # Subsamples the dataset at the provided indices.
-        assert len(set(indices)) == len(indices), "No duplicates allowed in indices."
-        dataset = self if inplace else copy.deepcopy(self)
-        dataset.samples = self.samples.iloc[indices].reset_index(drop=True)
-        return dataset
-
-    @property
-    def img_samples(self) -> DataFrame:
-        """Get the samples dataframe."""
-        if not self.is_setup:
-            raise RuntimeError("Dataset is not setup yet. Call setup() first.")
-        return self.samples
-
-    @img_samples.setter
-    def img_samples(self, samples: DataFrame) -> None:
-        """Overwrite the samples with a new dataframe.
-
-        Args:
-            samples (DataFrame): DataFrame with new samples.
-        """
-        self.samples = samples.sort_values(by="image_path", ignore_index=True)
+        return len(self.df_images)
 
     def __getitem__(self, index: int) -> dict[str, str | Tensor]:
-        image_path = self.img_samples.iloc[index].image_path
-        mask_path = self.img_samples.iloc[index].mask_path
-        label_index = self.img_samples.iloc[index].label_index
+        image_path = self.df_images.iloc[index].image_path
+        mask_path = self.df_images.iloc[index].mask_path
+        label_index = self.df_images.iloc[index].label_index
 
         image = read_image(image_path)
         item = dict(image_path=image_path, label=label_index)
@@ -160,9 +121,8 @@ class CustomDataset(Dataset, ABC):
             raise ValueError(f"Unknown task type: {self.task}")
 
         return item
-        
-        
-#class MVTec(AnomalibDataModule):
+
+
 class CustomDataModule(LightningDataModule, ABC):
     def __init__(
         self,
@@ -279,7 +239,7 @@ class InferenceDataset(Dataset):
         """Get the number of images in the given path."""
         return len(self.image_filenames)
 
-    def __getitem__(self, index: int) -> Any:
+    def __getitem__(self, index: int):
         """Get the image based on the `index`."""
         image_filename = self.image_filenames[index]
         image = read_image(path=image_filename)
