@@ -5,11 +5,8 @@
 # https://github.com/hq-deng/RD4AD
 # SPDX-License-Identifier: MIT
 
-from __future__ import annotations
-
 import torch
 from torch import Tensor, nn
-
 
 class ReverseDistillationLoss(nn.Module):
     """Loss function for Reverse Distillation."""

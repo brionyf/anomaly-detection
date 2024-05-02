@@ -24,14 +24,9 @@ from torch.utils.data import DataLoader, default_collate
 from torch.utils.data.dataset import Dataset, random_split
 
 from transforms import get_transforms
-from images import read_image, get_image_filenames
+from images import read_image
 
 logger = logging.getLogger(__name__)
-
-def get_args():
-    parser = ArgumentParser()
-    parser.add_argument("--model", type=str, help="Name of model to train/evaluate")
-    return parser.parse_args()
     
 def collate_fn(batch: list):
     return default_collate(batch)
@@ -96,32 +91,24 @@ class CustomDataset(Dataset, ABC):
         image = read_image(image_path)
         item = dict(image_path=image_path, label=label_index)
 
-        if self.task == 'classification':
-            transformed = self.transform(image=image)
-            item["image"] = transformed["image"]
-        elif self.task in ('detection', 'segmentation'):
-            # Only Anomalous (1) images have masks in anomaly datasets
-            # Therefore, create empty mask for Normal (0) images.
+        if self.task in ('detection', 'segmentation'):
             if label_index == 0:
-                mask = np.zeros(shape=image.shape[:2])
+                mask = np.zeros(shape=image.shape[:2]) # create empty mask for normal (0) images
             else:
-                mask = cv2.imread(mask_path, flags=0) / 255.0
-
+                mask = cv2.imread(mask_path, flags=0) / 255.0 # load mask for anomalous (1) images
             transformed = self.transform(image=image, mask=mask)
 
             item["image"] = transformed["image"]
             item["mask_path"] = mask_path
             item["mask"] = transformed["mask"]
 
-            if self.task == 'detection':
-                # create boxes from masks for detection task
-                boxes, _ = masks_to_boxes(item["mask"])
-                item["boxes"] = boxes[0]
+            # if self.task == 'detection':
+            #     boxes, _ = masks_to_boxes(item["mask"]) # create boxes from masks for detection task
+            #     item["boxes"] = boxes[0]
         else:
             raise ValueError(f"Unknown task type: {self.task}")
 
         return item
-
 
 class CustomDataModule(LightningDataModule, ABC):
     def __init__(
@@ -157,14 +144,14 @@ class CustomDataModule(LightningDataModule, ABC):
         self.seed = seed
 
         transform_train = get_transforms(
-            config=transform_config_train,
+            # config=transform_config_train,
             image_size=image_size,
             center_crop=center_crop,
             normalization=normalization,
             training=True,
         )
         transform_eval = get_transforms(
-            config=transform_config_eval,
+            # config=transform_config_eval,
             image_size=image_size,
             center_crop=center_crop,
             normalization=normalization,
@@ -222,17 +209,10 @@ class InferenceDataset(Dataset):
         self,
         files,
         transform: A.Compose | None = None,
-        image_size: int | tuple[int, int] | None = None,
     ) -> None:
         super().__init__()
-
         self.image_filenames = files
-
-        if transform is None:
-            self.transform = get_transforms(image_size=image_size)
-        else:
-            self.transform = transform
-
+        self.transform = transform
         self.old_min = 0  # CUSTOM - added ...
 
     def __len__(self) -> int:
@@ -243,16 +223,13 @@ class InferenceDataset(Dataset):
         """Get the image based on the `index`."""
         image_filename = self.image_filenames[index]
         image = read_image(path=image_filename)
-        # new_x_min = self.auto_crop_image(image)  # OPTIONS: 800, 1100, self.auto_crop_image(image)
-        # image = image[:, new_x_min:3900, :]
-        # if index == 0: print(new_x_min)
+        # print('>>>>>>>>>>>>>>> Image shape: {}'.format(image.shape))  # result is: (2168, 4096, 3)
         image = self._auto_crop_image(image)
-        # print('>>>>>>>>>>>>>>> Image shape: {}'.format(image.shape))  # result is: (2168, 3100, 3)
+        # print('>>>>>>>>>>>>>>> Post auto-crop: {}'.format(image.shape))  # result is: (2168, 3200, 3)
         pre_processed = self.transform(image=image)
-        # print('>>>>>>>>>>>>>>> {} {} {}'.format(image.shape, pre_processed["image"].shape, pre_processed["image"].dtype))  # result is: torch.Size([3, 256, 256]) torch.float32
+        # print('>>>>>>>>>>>>>>> Post transforms: {} {} {}'.format(image.shape, pre_processed["image"].shape, pre_processed["image"].dtype))  # result is: torch.Size([3, 256, 256]) torch.float32
         pre_processed["image_path"] = str(image_filename)
         pre_processed["original_image"] = image
-
         return pre_processed
 
     def _auto_crop_image(self, img):  # TODO: some values are hardcoded, so if images are different sizes, will result in wrong crops
@@ -294,10 +271,8 @@ class InferenceDataset(Dataset):
         return img[:, x_resized:x_max, :] #x_resized
 
 #####################################################################################################################
-# The below is just for testing
-#####################################################################################################################
 
-def get_configurable_parameters(
+def get_config_params(
     model_name: str | None = None,
     config_path: Path | str | None = None,
     weight_file: str | None = None,
@@ -305,11 +280,14 @@ def get_configurable_parameters(
     #config_file_extension: str | None = "yaml",
 ) -> DictConfig | ListConfig:
 
-    config_path = Path(os.getcwd(), 'models', model_name, 'config.yaml')
+    if config_path is None:
+        config_path = Path(os.getcwd(), 'models', model_name, 'config.yaml')
+    else:
+        config_path = Path(os.getcwd() + config_path)
     config = OmegaConf.load(config_path)
 
     # keep track of the original config file because it will be modified
-    config_original: DictConfig = config.copy()
+    config_original = config.copy()
 
     # if the seed value is 0, notify a user that the behavior of the seed value zero has been changed.
     if config.project.get("seed") == 0:
@@ -344,10 +322,19 @@ def get_configurable_parameters(
     #(project_path / "config.yaml").write_text(OmegaConf.to_yaml(config))
 
     return config
-    
+
+#####################################################################################################################
+# The below is just for testing
+#####################################################################################################################
+
+def get_args():
+    parser = ArgumentParser()
+    parser.add_argument("--model", type=str, help="Name of model to train/evaluate")
+    return parser.parse_args()
+
 if __name__ == "__main__":
     args = get_args()
-    config = get_configurable_parameters(model_name=args.model) #, config_path=args.config)
+    config = get_config_params(model_name=args.model) #, config_path=args.config)
     print("Project path: {}".format(config.project.path))
 
     datamodule = CustomDataModule(

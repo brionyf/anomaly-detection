@@ -6,21 +6,15 @@ from importlib import import_module
 from omegaconf import DictConfig, ListConfig
 
 from pytorch_lightning import Trainer, seed_everything
-from pytorch_lightning.loggers import Logger
+#from pytorch_lightning.loggers import Logger
 
-from dataset import CustomDataModule, get_configurable_parameters
+from dataset import CustomDataModule, get_config_params
 
-#from anomalib.utils.callbacks import LoadModelCallback, get_callbacks
-#from anomalib.utils.loggers import configure_logger, get_experiment_logger
-
-from models.model_1 import get_callbacks, Model1
-
-__all__ = [
-    "Model1",
-]
+from models.model_1 import Model1
+from callbacks import get_callbacks
+__all__ = ["Model1", "get_model", "configure_logger"]
 
 logger = logging.getLogger("train.py")
-
 
 def get_args() -> Namespace:
     parser = ArgumentParser()
@@ -30,44 +24,31 @@ def get_args() -> Namespace:
     parser.add_argument("--test", type=str, default="True", help="Run model on test set? [DEFAULT: True]")
     args = parser.parse_args()
     return args
-    
 
 def configure_logger(level: int | str = logging.INFO):
-
     if isinstance(level, str):
         level = logging.getLevelName(level)
-
     format_string = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     logging.basicConfig(format=format_string, level=level)
-
     # Set Pytorch Lightning logs to have a the consistent formatting with anomalib.
     for handler in logging.getLogger("pytorch_lightning").handlers:
         handler.setFormatter(logging.Formatter(format_string))
         handler.setLevel(level)
-        
     #return logger.addHandler(handler)
-        
-        
+
 def get_model(config: DictConfig | ListConfig):
-
-    logger.info("Loading the model.")
-
+    logger.info("Loading the model...")
     model_list = ["model_1"]
-
     if config.model.name in model_list:
         module = import_module(f"models.{config.model.name}")
         model_file = "".join([split.capitalize() for split in config.model.name.split("_")])
         model = getattr(module, f"{model_file}")(config)
-
     else:
         raise ValueError(f"Unknown model {config.model.name}!")
-
     #if "init_weights" in config.keys() and config.init_weights:
     #    model.load_state_dict(load(os.path.join(config.project.path, config.init_weights))["state_dict"], strict=False)
-
     return model
-    
-    
+
 def train():
 
     args = get_args()
@@ -76,7 +57,7 @@ def train():
 
     warnings.filterwarnings("ignore")
 
-    config = get_configurable_parameters(model_name=args.model) #, config_path=args.config)
+    config = get_config_params(model_name=args.model) #, config_path=args.config)
     if config.project.get("seed") is not None:
         seed_everything(config.project.seed)
     print("Project path: {}".format(config.project.path))
@@ -125,6 +106,8 @@ def train():
     #        print("Opted out of testing. Skipping test stage.")
     #        logger.info("Opted out of testing. Skipping test stage.")
     #        # CUSTOM - end
+
+    logger.info("Training complete :)")
 
 
 if __name__ == "__main__":
