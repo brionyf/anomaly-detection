@@ -15,6 +15,7 @@ from dataset import InferenceDataset, get_config_params
 from images import get_image_filenames
 from train import get_model, configure_logger
 from callbacks import get_callbacks, LoadModelCallback, SaveImageCallback
+from anomaly_normalisation import NormalisationCallback
 
 logger = logging.getLogger("inference.py")
 
@@ -30,7 +31,7 @@ def get_args():
 def infer():
     args = get_args()
     configure_logger(level=args.log_level)
-    config = get_config_params(config_path=args.config)
+    config = get_config_params(config_path=args.config, infer=True)
     config.trainer.resume_from_checkpoint = os.getcwd() + str(args.weights)
     # config.visualization.show_images = args.show
     # config.visualization.mode = args.visualization_mode
@@ -45,6 +46,7 @@ def infer():
     model = get_model(config)
     callbacks = get_callbacks(config)
     callbacks.append(LoadModelCallback(config.trainer.resume_from_checkpoint))
+    callbacks.append(NormalisationCallback(config.model.normalization_method))
     if config.visualization.save_images:
         callbacks.append(SaveImageCallback(config.visualization.image_save_path))
     trainer = Trainer(callbacks=callbacks, **config.trainer)
@@ -74,3 +76,5 @@ def infer():
 if __name__ == "__main__":
     infer()
 
+# Command to perform inference:
+# (anomalib_env2) brionyf@brionyf-Precision-3650-Tower:~/Documents/GitHub/anomaly-detection$ python inference.py --config /models/model_1/config.yaml --weights /results/model_1/carpet/2024-05-02_15-18-47/weights/model.ckpt --input '/media/brionyf/T7/AKL Finishing Line/Images - Basler/2024-04-24 12-24-08' --output '/media/brionyf/T7/AKL Finishing Line/Images - Basler/2024-04-24 12-24-08/detections'

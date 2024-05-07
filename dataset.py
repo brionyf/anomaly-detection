@@ -9,6 +9,8 @@ from omegaconf import DictConfig, ListConfig, OmegaConf
 from datetime import datetime
 import copy
 
+import warnings
+from warnings import warn
 import logging
 from pathlib import Path
 from typing import Sequence
@@ -278,6 +280,7 @@ def get_config_params(
     weight_file: str | None = None,
     #config_filename: str | None = "config",
     #config_file_extension: str | None = "yaml",
+    infer = False,
 ) -> DictConfig | ListConfig:
 
     if config_path is None:
@@ -303,18 +306,19 @@ def get_config_params(
         config.dataset.center_crop = None
 
     # Project Configs
-    current_datetime = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    project_path = Path(config.project.path) / config.model.name / config.dataset.category
-    project_path = project_path / current_datetime 
-    (project_path / "weights").mkdir(parents=True, exist_ok=True)
-    (project_path / "images").mkdir(parents=True, exist_ok=True)
-    # write the original config for eventual debug (modified config at the end of the function)
-    (project_path / "config_original.yaml").write_text(OmegaConf.to_yaml(config_original))
+    if not infer:
+        current_datetime = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        project_path = Path(config.project.path) / config.model.name / config.dataset.category
+        project_path = project_path / current_datetime
+        (project_path / "weights").mkdir(parents=True, exist_ok=True)
+        (project_path / "images").mkdir(parents=True, exist_ok=True)
+        # write the original config for eventual debug (modified config at the end of the function)
+        (project_path / "config_original.yaml").write_text(OmegaConf.to_yaml(config_original))
 
-    config.project.path = str(project_path)
+        config.project.path = str(project_path)
 
-    # loggers should write to results/model/dataset/category/ folder
-    config.trainer.default_root_dir = str(project_path)
+        # loggers should write to results/model/dataset/category/ folder
+        config.trainer.default_root_dir = str(project_path)
 
     if weight_file:
         config.trainer.resume_from_checkpoint = weight_file

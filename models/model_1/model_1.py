@@ -18,7 +18,7 @@ from argparse import ArgumentParser
 import torch
 from torch import Tensor, nn, optim
 import torch.nn.functional as F
-from torchmetrics import PrecisionRecallCurve
+from torchmetrics import PrecisionRecallCurve, Metric
 import pytorch_lightning as pl
 import torchvision.transforms as T
 
@@ -83,9 +83,14 @@ class Model1(pl.LightningModule, ABC): #ReverseDistillationModel
         self.decoder = de_wide_resnet50_2(pretrained=False).to(device)
 
         # self.tiler: Tiler | None = None
-        self.tiler = Tiler(hparams.dataset.tiling.tile_size)
+        if hparams.dataset.tiling.apply:
+            self.tiler = Tiler(hparams.dataset.tiling.tile_size)
+        else:
+            self.tiler = None
 
-        self.threshold_value = 0.
+        # self.threshold_value = 0.
+        # self.norm_metric = MinMax()
+        self.normalization_metrics: Metric # TODO: rename to 'norm_metric'
 
     def configure_optimizers(self):
     #when initializing an optimizer, you explicitly tell it what parameters (params) of the model it should be updating. The gradients are "stored"
@@ -143,42 +148,34 @@ class Model1(pl.LightningModule, ABC): #ReverseDistillationModel
         outputs = self.validation_step(batch) # get anomaly maps
         # print('>>>>>>>>>>>>>>> predict outputs size: {}'.format(outputs["anomaly_maps"].shape))  # result is: torch.Size([1, 1, 542, 800])
 
-        # image = np.transpose(outputs["anomaly_maps"].cpu().squeeze(0).numpy(), (1, 2, 0))
-        # # print('>>>>>>>>>>>>>>> Image size: {}'.format(image.shape))
-        # plt.imshow(image, interpolation='nearest')
-        # plt.show()
-
-        a_min, a_max = torch.min(outputs["anomaly_maps"]), torch.max(outputs["anomaly_maps"]) # def min_max_norm(image):
-        # print(">>>>>>>>>>>>>>> Pre normalisation (min, max): {}, {}".format(a_min, a_max))  # result is:
-        outputs["anomaly_maps"] = (outputs["anomaly_maps"] - a_min) / (a_max - a_min)
-        # print(">>>>>>>>>>>>>>> Computed threshold value to be: {}".format(self.threshold_value))
-        # print(">>>>>>>>>>>>>>> Post normalisation (min, max): {}, {}".format(torch.min(outputs["anomaly_maps"]), torch.max(outputs["anomaly_maps"])))  # result is:
-
-        self._compute_adaptive_threshold(outputs["anomaly_maps"]) #, batch["mask"])
-        # print(">>>>>>>>>>>>>>> Computed threshold value to be: {}".format(self.threshold_value))
-        if outputs is not None and isinstance(outputs, dict):
-            outputs["pred_masks"] = outputs["anomaly_maps"] >= 0.8 #self.threshold_value
+        # self._compute_adaptive_threshold(outputs["anomaly_maps"]) #, batch["mask"])
+        # # print(">>>>>>>>>>>>>>> Computed threshold value to be: {}".format(self.threshold_value))
+        #
+        # if outputs is not None and isinstance(outputs, dict):
+        #     outputs["pred_masks"] = outputs["anomaly_maps"] >= self.threshold_value
 
         # gc.collect()
         return outputs
 
-    def _compute_adaptive_threshold(self, pred, target=None):
-        # Compute the threshold that yields the optimal F1 score.
-        # if not any(1 in gt for gt in target):
-        if target is None:
-            warnings.warn(
-                "The validation set does not contain any anomalous images. Adaptive threshold will be based on the "
-                "highest anomaly score observed in the normal validation images."
-            )
-            # print(">>>>>>>>>>>>>>> pred to mask info: {} device \{} shape".format(pred.device, pred.shape))
-            target = torch.zeros(size=pred.shape).to('cuda')
-            # target = torch.from_numpy(np.zeros(pred.shape))
-        pr_curve = PrecisionRecallCurve(task="binary")
-        precision, recall, thresholds = pr_curve(pred, target) # super().compute()
-        f1_score = (2 * precision * recall) / (precision + recall + 1e-10)
-        self.threshold_value = thresholds
-        if thresholds.dim() != 0:
-            self.threshold_value = thresholds[torch.argmax(f1_score)]
+    # def _compute_adaptive_threshold(self, pred, target=None):
+    #     # Compute the threshold that yields the optimal F1 score.
+    #     # if not any(1 in gt for gt in target):
+    #     if target is None:
+    #         warnings.warn(
+    #             "The validation set does not contain any anomalous images. Adaptive threshold will be based on the "
+    #             "highest anomaly score observed in the normal validation images."
+    #         )
+    #         # print(">>>>>>>>>>>>>>> pred to mask info: {} device \t{} shape".format(pred.device, pred.shape))
+    #         target = torch.zeros(size=pred.shape).to('cuda')
+    #         # target = torch.from_numpy(np.zeros(pred.shape))
+    #     pr_curve = PrecisionRecallCurve(task="binary")
+    #     precision, recall, thresholds = pr_curve(pred, target) # super().compute()
+    #     f1_score = (2 * precision * recall) / (precision + recall + 1e-10)
+    #     self.threshold_value = thresholds
+    #     if thresholds.dim() != 0:
+    #         self.threshold_value = thresholds[torch.argmax(f1_score)]
+    #     # print(">>>>>>>>>>>>>>> image min: {} image max: {} threshold: {} precision: {} recall: {} f1_score: {}".format(pred.min(), pred.max(), self.threshold_value, precision, recall, f1_score))
+    #
 
 #####################################################################################################################
 # The below is just for testing

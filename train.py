@@ -9,6 +9,7 @@ from pytorch_lightning import Trainer, seed_everything
 #from pytorch_lightning.loggers import Logger
 
 from dataset import CustomDataModule, get_config_params
+from anomaly_normalisation import NormalisationCallback
 
 from models.model_1 import Model1
 from callbacks import get_callbacks
@@ -85,6 +86,7 @@ def train():
     model = get_model(config)
     #experiment_logger = get_experiment_logger(config)
     callbacks = get_callbacks(config)
+    callbacks.append(NormalisationCallback(config.model.normalization_method))
 
     trainer = Trainer(**config.trainer, logger=False, callbacks=callbacks) #, logger=experiment_logger
     logger.info("Training the model...")
@@ -112,3 +114,6 @@ def train():
 
 if __name__ == "__main__":
     train()
+
+# Command to train:
+# (anomalib_env2) brionyf@brionyf-Precision-3650-Tower:~/Documents/GitHub/anomaly-detection$ python train.py --model model_1

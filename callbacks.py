@@ -2,6 +2,7 @@ import logging
 import os
 from pathlib import Path
 import warnings
+from warnings import warn
 from importlib import import_module
 
 import cv2
@@ -13,10 +14,11 @@ from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks import Callback, ModelCheckpoint, EarlyStopping
 
 from images import visualize_predict_batch
+from anomaly_normalisation import MinMax
 
 logger = logging.getLogger(__name__)
 
-def get_callbacks(config: DictConfig | ListConfig) -> list[Callback]:
+def get_callbacks(config):
 
     logger.info("Loading the callbacks...")
 
@@ -38,6 +40,8 @@ def get_callbacks(config: DictConfig | ListConfig) -> list[Callback]:
         auto_insert_metric_name=False,
     )
 
+    callbacks.extend([early_stopping, model_checkpoint])
+
     return callbacks
 
 class LoadModelCallback(Callback):
@@ -46,11 +50,19 @@ class LoadModelCallback(Callback):
     def __init__(self, weights_path):
         self.weights_path = weights_path
 
-    def setup(self, trainer: Trainer, pl_module: pl.LightningModule, stage: str | None = None):
-        # Called when inference begins
-        del trainer, stage  # These variables are not used.
+    def setup(self, trainer, pl_module, stage): # Called when inference begins
+        del trainer, stage  # Unused variables
         logger.info("Loading the model from %s...", self.weights_path)
-        pl_module.load_state_dict(torch.load(self.weights_path, map_location=pl_module.device)["state_dict"])
+        state_dict = torch.load(self.weights_path, map_location='cpu')["state_dict"]
+        if "normalization_metrics.max" in state_dict.keys():
+            pl_module.normalization_metrics = MinMax()
+        elif "normalization_metrics.image_mean" in state_dict.keys():
+            # pl_module.normalization_metrics = AnomalyScoreDistribution()
+            pass
+        else:
+            warn("No known normalization found in model weights...")
+
+        pl_module.load_state_dict(state_dict)
 
 class SaveImageCallback(Callback):
     def __init__(self, save_path):
@@ -60,7 +72,7 @@ class SaveImageCallback(Callback):
             del trainer, pl_module, batch, batch_idx, dataloader_idx  # unused variables
 
             assert outputs is not None
-            # print('>>>>>>>>>>>>>>> Save Callback - outputs: {} {}'.format(len(outputs), outputs["anomaly_maps"].shape))  # result is:
+            # print('>>>>>>>>>>>>>>> Save Callback - outputs: {} {}'.format(len(outputs), outputs["pred_masks"].shape))  # result is:
             for i, (image, heatmap) in enumerate(visualize_predict_batch(outputs)):
 
                 filename = Path(outputs["image_path"][i])
