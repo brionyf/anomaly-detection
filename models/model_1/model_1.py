@@ -3,22 +3,20 @@
 https://arxiv.org/abs/2201.10703v2
 """
 
-import numpy as np
 import os
 import logging
 from pathlib import Path
 from abc import ABC
 
-import warnings
 from warnings import warn
 from kornia.filters import gaussian_blur2d
 from omegaconf import ListConfig, OmegaConf, DictConfig
 from argparse import ArgumentParser
 
 import torch
-from torch import Tensor, nn, optim
+from torch import Tensor, optim
 import torch.nn.functional as F
-from torchmetrics import PrecisionRecallCurve, Metric
+from torchmetrics import Metric
 import pytorch_lightning as pl
 import torchvision.transforms as T
 
@@ -29,10 +27,16 @@ import torchvision.transforms as T
 #    de_resnet18, de_resnet34, de_wide_resnet50_2, de_resnet50, 
 #    resnet18, resnet34, resnet50, wide_resnet50_2,
 #)
-from tiler import Tiler
-from .de_resnet import de_resnet18, de_resnet34, de_wide_resnet50_2, de_resnet50
-from .resnet import resnet18, resnet34, resnet50, wide_resnet50_2
-from .loss import loss_function, loss_concat
+from not_needed.tiler import Tiler
+# from .de_resnet import de_resnet50
+# from .resnet import resnet50
+# from .loss import loss_function, loss_concat, loss_custom
+from .loss import ReverseDistillationLoss
+from .components import (
+    FeatureExtractor,
+    get_bottleneck_layer,
+    get_decoder,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -73,20 +77,38 @@ class Model1(pl.LightningModule, ABC): #ReverseDistillationModel
         self.beta1 = hparams.model.beta1
         self.beta2 = hparams.model.beta2
         self.image_size = hparams.dataset.image_size
+        self.resize_ratio = hparams.dataset.resize_ratio
         self.mode = hparams.model.anomaly_map_mode
+        self.layers = hparams.model.layers
         
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
         #print("Device: {}".format(device))
-        encoder, bottleneck = wide_resnet50_2(pretrained=True)
-        self.encoder = encoder.to(device)
-        self.bottleneck = bottleneck.to(device)
-        self.decoder = de_wide_resnet50_2(pretrained=False).to(device)
+
+        # encoder_backbone = hparams.model.backbone
+        # self.encoder = FeatureExtractor(backbone=encoder_backbone, pre_trained=hparams.model.pre_trained, layers=hparams.model.layers)
+        # self.bottleneck = get_bottleneck_layer(hparams.model.backbone)
+        # self.decoder = get_decoder(hparams.model.backbone)
+        self.anomalib = True
+        if self.anomalib:
+            self.encoder = FeatureExtractor(backbone=hparams.model.backbone, pre_trained=hparams.model.pre_trained, layers=self.layers)
+            self.bottleneck = get_bottleneck_layer(hparams.model.backbone)
+            self.decoder = get_decoder(hparams.model.backbone)
+        else:
+            pass
+            # encoder, bottleneck = resnet50(pretrained=True) # TODO: don't hardcode backbone, read in from config (like above)
+            # self.encoder = encoder.to(device)
+            # self.bottleneck = bottleneck.to(device)
+            # self.decoder = de_resnet50(pretrained=False).to(device) # TODO: don't hardcode backbone, read in from config (like above)
 
         # self.tiler: Tiler | None = None
         if hparams.dataset.tiling.apply:
             self.tiler = Tiler(hparams.dataset.tiling.tile_size)
         else:
             self.tiler = None
+
+        self.loss_function = ReverseDistillationLoss()
+        self.normal_loss = 0
+        self.anomaly_loss = 0
 
         # self.threshold_value = 0.
         # self.norm_metric = MinMax()
@@ -103,42 +125,56 @@ class Model1(pl.LightningModule, ABC): #ReverseDistillationModel
             betas=(self.beta1, self.beta2),
         )
 
-    def training_step(self, batch: dict[str, str | Tensor]):
-        loss = loss_function(self.forward(batch["image"]))
-        self.log("train_loss", loss.item(), on_epoch=True, prog_bar=True, logger=True)
-        return {"loss": loss} # Feature Map
-
-    def validation_step(self, batch, *args, **kwargs):
-        del args, kwargs  # Unused variables
-        # print(">>>>>>>>>>>>>>> here in validation...")
-        batch["anomaly_maps"] = self.forward(batch["image"])
-        return batch
-
     def forward(self, images: Tensor) -> Tensor | list[Tensor] | tuple[list[Tensor]]:
+    # def forward(self, images: Tensor, images_rot: Tensor) -> Tensor | list[Tensor] | tuple[list[Tensor]]:
         # print(">>>>>>>>>>>>>>> now in forward...")
         self.encoder.eval()
 
         if self.tiler:
             images = self.tiler.tile(images)
             images = T.Resize((256, 256))(images)  # CUSTOM: TODO - replace (256,256) with input_size
-            # print(">>>>>>>>>>>>>>> foward image size after tiling: {}".format(images.shape))  # result is: torch.Size([12, 3, 256, 256])
+            # print(">>>>>>>>>>>>>>> forward image size after tiling: {}".format(images.shape))  # result is: torch.Size([12, 3, 256, 256])
 
         if self.training: # TODO: self.training is an attribute of pl.LightningModule class -> confirm
             encoder_features = self.encoder(images)
+            if self.anomalib: encoder_features = list(encoder_features.values())
             decoder_features = self.decoder(self.bottleneck(encoder_features))
         else:
             with torch.no_grad():
                 encoder_features = self.encoder(images)
+                if self.anomalib: encoder_features = list(encoder_features.values())
                 decoder_features = self.decoder(self.bottleneck(encoder_features))
 
         if self.training: # TODO: self.training is an attribute of pl.LightningModule class -> confirm
             output = encoder_features, decoder_features
         else:
-            output = calculate_anomaly_map(encoder_features, decoder_features, self.image_size, mode=self.mode)
+            image_size = images.shape[2:] #[int(val / self.resize_ratio) for val in images.shape[2:]]
+            # print(">>>>>>>>>>>>>>>> Anomaly Maps: image size = {}".format(image_size))
+            output = calculate_anomaly_map(encoder_features, decoder_features, image_size, mode=self.mode)
             if self.tiler:
                 output = self.tiler.untile(output)
 
         return output
+
+    def training_step(self, batch: dict[str, str | Tensor]):
+        # loss = loss_function(self.forward(batch["image"]), self.image_size)
+        batch["model_outputs"] = self.forward(batch["image"]) #, batch["rotated"])
+        # loss = self.loss(batch, self.image_size)
+        self.normal_loss, self.anomaly_loss = self.loss_function(batch)#, self.resize_ratio)
+        loss = 0.3 * self.normal_loss + 1.0 * self.anomaly_loss
+        # loss = self.normal_loss * self.anomaly_loss
+        self.log("train_loss", loss.item(), on_epoch=True, prog_bar=True, logger=True)
+        return {"loss": loss}
+
+    def on_train_epoch_end(self):
+        # print(">>>>>>>>>>>>>>>> Normal Loss: {} \tAnomaly Loss: {}".format(self.normal_loss, self.anomaly_loss))
+        pass
+
+    def validation_step(self, batch, *args, **kwargs):
+        del args, kwargs  # Unused variables
+        # print(">>>>>>>>>>>>>>> here in validation...")
+        batch["anomaly_maps"] = self.forward(batch["image"]) #, batch["rotated"])
+        return batch
 
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
 
@@ -156,6 +192,11 @@ class Model1(pl.LightningModule, ABC): #ReverseDistillationModel
 
         # gc.collect()
         return outputs
+
+    def test_step(self, batch: dict[str, str | Tensor], batch_idx: int, *args, **kwargs):
+        del args, kwargs  # These variables are not used.
+        # return self.predict_step(batch, batch_idx)
+        return self.validation_step(batch, batch_idx)
 
     # def _compute_adaptive_threshold(self, pred, target=None):
     #     # Compute the threshold that yields the optimal F1 score.

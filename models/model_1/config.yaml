@@ -1,24 +1,28 @@
 dataset:
-  path: '/media/brionyf/Seagate Expansion Drive/Briony/Documents/University of Auckland/PhD/Datasets/AKL Finishing Line/original/1024/'
+  #path: '/media/brionyf/Seagate Expansion Drive/Briony/Documents/University of Auckland/PhD/Datasets/AKL Finishing Line/original/1024/'
+  #path: '/home/brionyf/Desktop/Images/training/Carpet3_20240610_1024/'
+  path: '/home/brionyf/Desktop/Images/training/Carpet4_20240610_1024/'
   category: carpet
   task: segmentation # options: [segmentation, classification, detection]
-  train_batch_size: 8
-  eval_batch_size: 8
+  train_batch_size: 4
+  eval_batch_size: 4
   inference_batch_size: 1
   num_workers: 8
-  image_size: 256 # dimensions to which images are resized (mandatory)
+  image_size: 256 # dimensions to which images are resized
+  resize_ratio: 4 # factor by which images are downscaled
+  grayscale: False
   center_crop: null # dimensions to which images are center-cropped after resizing (optional)
   normalization: imagenet # data distribution to which the images will be normalized: [none, imagenet]
   transform_config:
     train: null
     eval: null
   test_split_mode: from_dir # options: [from_dir, synthetic]
-  test_split_ratio: 0.2 # fraction of train images held out testing (usage depends on test_split_mode)
+  test_split_ratio: 0.5 # fraction of train images held out testing (usage depends on test_split_mode)
   val_split_mode: same_as_test # options: [same_as_test, from_test, synthetic]
   val_split_ratio: 0.5 # fraction of train/test images held out for validation (usage depends on val_split_mode)
   tiling:
-    apply: true #false #true
-    tile_size: 1024 #null #1024
+    apply: false #false #true
+    tile_size: null #null #1024
     stride: null
     remove_border_count: 0
     use_random_tiling: False
@@ -27,15 +31,15 @@ dataset:
 model:
   name: model_1 #reverse_distillation
   lr: 0.005
-  backbone: wide_resnet50_2 #resnet50
+  backbone: wide_resnet50_2 # Options: resnet18, resnet34, resnet50, wide_resnet50_2
   pre_trained: true
   layers:
     - layer1
     - layer2
-    - layer3
+#    - layer3
   early_stopping:
     patience: 3
-    metric: train_loss #pixel_AUROC
+    metric: train_loss #options: train_loss (-> min), val_acc (-> max), pixel_AUROC
     mode: min #max
   beta1: 0.5
   beta2: 0.99
@@ -83,11 +87,11 @@ trainer:
   enable_progress_bar: true
   overfit_batches: 0.0
   track_grad_norm: -1
-  check_val_every_n_epoch: 2 # Don't validate before extracting features.
+  check_val_every_n_epoch: 10 # Don't validate before extracting features.
   fast_dev_run: false
   accumulate_grad_batches: 1
-  max_epochs: 20 #200
-  min_epochs: null
+  max_epochs: 100
+  min_epochs: 40
   max_steps: -1
   min_steps: null
   max_time: null

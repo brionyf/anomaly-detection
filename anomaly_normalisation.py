@@ -1,4 +1,4 @@
-# Variation of original Code:
+# Variation of original code:
 # Copyright (C) 2022 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 # https://github.com/openvinotoolkit/anomalib
@@ -44,19 +44,38 @@ class NormalisationCallback(Callback):
             pl_module.normalization_metrics(outputs["anomaly_maps"]) # update the (min and max) or (mean and std) observed values
 
     def on_predict_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx):
+    # def on_predict_batch_end(self, pl_module, outputs, *args, **kwargs):
         del trainer, batch, batch_idx, dataloader_idx  # Unused variables
+        # del args, kwargs
+        # print(">>>>>>>>>> am in 'on_predict_batch_end")
+        stats = pl_module.normalization_metrics.cpu()
+        # print(">>>>>>>>>> stats: {} {}".format(stats.min, stats.max)) # example result: 0.0001226883177878335 0.734123170375824
+        pixel_threshold = int(stats.max / 10) #10 * stats.max # pl_module.pixel_threshold.value.cpu()
+        mask_threshold = 0.1 #0.5 # TODO: makes sense if this = 0 when the min-max limits have only been determined from anomaly-free images during validation
+        if "anomaly_maps" in outputs: # normalize a batch of predictions (anomaly maps)
+            if self.norm_method == 'min_max':
+                outputs["anomaly_maps"] = minmax_normalise(outputs["anomaly_maps"], pixel_threshold, stats.min, stats.max)
+                # print(">>>>>>>>> anomaly map limits: {} {}".format(outputs["anomaly_maps"].min(), outputs["anomaly_maps"].max())) # example result is: 0.00023686737404204905 1.0
+                outputs["pred_masks"] = outputs["anomaly_maps"] > mask_threshold
+            elif self.norm_method == 'cdf':
+                pass
+                # outputs["anomaly_maps"] = standardize(outputs["anomaly_maps"], stats.pixel_mean, stats.pixel_std, center_at=stats.image_mean)
+                # outputs["anomaly_maps"] = cdf_normalize(outputs["anomaly_maps"], pixel_threshold)
+
+    def on_test_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx):
+        del trainer, batch, batch_idx, dataloader_idx  # Unused variables
+        # print(">>>>>>>>>> am in 'on_test_batch_end")
+        # self.on_predict_batch_end(pl_module, outputs)
 
         stats = pl_module.normalization_metrics.cpu()
-        pixel_threshold = 10 * stats.max # pl_module.pixel_threshold.value.cpu()
-        mask_threshold = 0
+        pixel_threshold = int(stats.max / 10) #10 * stats.max # pl_module.pixel_threshold.value.cpu()
+        mask_threshold = 0.1 #0.5 # TODO: makes sense if this = 0 when the min-max limits have only been determined from anomaly-free images during validation
         if "anomaly_maps" in outputs: # normalize a batch of predictions (anomaly maps)
             if self.norm_method == 'min_max':
                 outputs["anomaly_maps"] = minmax_normalise(outputs["anomaly_maps"], pixel_threshold, stats.min, stats.max)
                 outputs["pred_masks"] = outputs["anomaly_maps"] > mask_threshold
             elif self.norm_method == 'cdf':
                 pass
-                # outputs["anomaly_maps"] = standardize(outputs["anomaly_maps"], stats.pixel_mean, stats.pixel_std, center_at=stats.image_mean)
-                # outputs["anomaly_maps"] = cdf_normalize(outputs["anomaly_maps"], pixel_threshold)
 
 
 class MinMax(Metric):
@@ -73,7 +92,7 @@ class MinMax(Metric):
         self.max = torch.tensor(float("-inf"))
         # print('>>>>>>>>>>>>>>> Initialising MinMax Metric...')
 
-    def update(self, predictions, *args, **kwargs):
+    def update(self, predictions, *args, **kwargs): # TODO: only update with anomaly_maps from anomaly-free validation images
         del args, kwargs  # These variables are not used.
 
         if self.max == torch.tensor(float("-inf")):

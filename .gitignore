@@ -1,2 +1,6 @@
 *__pycache__*
 results/
+not_needed/
+lightning_logs/
+models/model_1/old/
+models/model_2

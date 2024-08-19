@@ -5,12 +5,6 @@ https://arxiv.org/abs/2201.10703v2
 
 from __future__ import annotations
 
-import numpy as np
-import cv2
-from matplotlib import pyplot as plt
-import gc
-import logging
-import os
 from abc import ABC
 from typing import Any, OrderedDict
 from warnings import warn
@@ -28,7 +22,7 @@ from pytorch_lightning.callbacks import Callback, EarlyStopping
 from pytorch_lightning.utilities.types import EPOCH_OUTPUT, STEP_OUTPUT
 
 from models.model_1 import ReverseDistillationLoss
-from tiler import Tiler
+from not_needed.tiler import Tiler
 
 
 
@@ -37,7 +31,6 @@ from anomalib.models.reverse_distillation.components import get_bottleneck_layer
 
 from anomalib.models.components import FeatureExtractor
 from anomalib.data.utils import boxes_to_anomaly_maps, boxes_to_masks, masks_to_boxes
-from anomalib.post_processing import ThresholdMethod
 from anomalib.utils.metrics import AnomalibMetricCollection, AnomalyScoreDistribution, AnomalyScoreThreshold, MinMax
  
  
