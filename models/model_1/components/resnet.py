@@ -11,6 +11,9 @@ from __future__ import annotations
 import logging
 import warnings
 
+import os
+# os.environ["HUGGINGFACE_HUB_CACHE"] = os.path.join(os.getcwd(), "Desktop/pretrained_models")
+
 import timm
 import torch
 from torch import Tensor, nn
@@ -18,7 +21,7 @@ from torch import Tensor, nn
 logger = logging.getLogger(__name__)
 
 
-class TimmFeatureExtractor(nn.Module):
+class FeatureExtractor(nn.Module):
     """Extract features from a CNN.
 
     Args:
@@ -29,18 +32,6 @@ class TimmFeatureExtractor(nn.Module):
             Models like ``stfpm`` use the feature extractor model as a trainable network. In such cases gradient
             computation is required.
 
-    Example:
-        >>> import torch
-        >>> from anomalib.models.components.feature_extractors import TimmFeatureExtractor
-
-        >>> model = TimmFeatureExtractor(model="resnet18", layers=['layer1', 'layer2', 'layer3'])
-        >>> input = torch.rand((32, 3, 256, 256))
-        >>> features = model(input)
-
-        >>> [layer for layer in features.keys()]
-            ['layer1', 'layer2', 'layer3']
-        >>> [feature.shape for feature in features.values()]
-            [torch.Size([32, 64, 64, 64]), torch.Size([32, 128, 32, 32]), torch.Size([32, 256, 16, 16])]
     """
 
     def __init__(self, backbone: str, layers: list[str], pre_trained: bool = True, requires_grad: bool = False):
@@ -101,17 +92,3 @@ class TimmFeatureExtractor(nn.Module):
             with torch.no_grad():
                 features = dict(zip(self.layers, self.feature_extractor(inputs)))
         return features
-
-
-class FeatureExtractor(TimmFeatureExtractor):
-    """Compatibility wrapper for the old FeatureExtractor class.
-
-    See :class:`anomalib.models.components.feature_extractors.timm.TimmFeatureExtractor` for more details.
-    """
-
-    def __init__(self, *args, **kwargs):
-        logger.warning(
-            "FeatureExtractor is deprecated. Use TimmFeatureExtractor instead."
-            " Both FeatureExtractor and TimmFeatureExtractor will be removed in a future release."
-        )
-        super().__init__(*args, **kwargs)
